@@ -1,0 +1,276 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  slug      String?  @unique
+  phone     String?  // Contato do Lojista
+  password  String
+  plan      String   @default("FREE") // FREE, PRO, ENTERPRISE
+  role      String   @default("USER") // USER, ADMIN
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  clients   Client[]
+  products  Product[]
+  services  Service[]
+  orders    ServiceOrder[]
+  payments Payment[]
+  osHistory OSHistory[]
+  cashRegisters CashRegister[]
+  inquiriesReceived ProductInquiry[] @relation("SellerInquiries")
+  inquiriesSent     ProductInquiry[] @relation("ClientInquiries")
+}
+
+model Client {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  name      String
+  cpfOrCnpj String?  // Novo
+  email     String?
+  phone     String?
+  whatsapp  String?  // Novo
+  address   String?
+  notes     String?  // Novo "Observações"
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  orders    ServiceOrder[]
+  devices   Device[] // Novo
+  @@index([userId])
+}
+
+model Device { // Novo Model
+  id          Int      @id @default(autoincrement())
+  clientId    Int
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  brand       String   // Marca
+  model       String   // Modelo
+  imei        String?  // IMEI
+  color       String?  // Cor
+  capacity    String?  // Capacidade (ex: 128GB)
+  condition   String?  // Estado (riscos, etc)
+  accessories String?  // Acessórios entregues
+
+  orders      ServiceOrder[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Product {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  name            String
+  category        String?  // Tela, Bateria...
+  internalCode    String?  // Código Interno
+  compatibleMod   String?  // Modelo Compatível
+  description     String?
+  price           Decimal  // Preço Venda
+  cost            Decimal  // Custo
+  stock           Int      @default(0)
+  minStock        Int      @default(0) // Estoque Mínimo
+  isActive        Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  orderItems      OrderItem[]
+
+  // Marketplace Fields
+  isPublic        Boolean  @default(false) // If true, shows in Shop/Marketplace
+  publicTitle     String?  // Friendly title for store
+  condition       String?  // NEW, USED, REFURBISHED
+  images          ProductImage[] // Up to 4 images
+  inquiries       ProductInquiry[]
+
+  @@index([userId])
+}
+
+model ProductImage {
+  id        Int      @id @default(autoincrement())
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String   // URL of the image
+  createdAt DateTime @default(now())
+}
+
+model Service {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  name            String
+  category        String?  // Hardware / Software
+  description     String?
+  price           Decimal
+  defaultTimeMin  Int?     // Tempo médio (minutos)
+  warrantyDays    Int      @default(90) // Garantia
+  isActive        Boolean  @default(true)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  orderItems      OrderItem[]
+
+  @@index([userId])
+}
+
+model ServiceOrder {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  clientId    Int
+  client      Client   @relation(fields: [clientId], references: [id])
+  
+  // Device Link (Optional for legacy support, but encouraged)
+  deviceId    Int?     
+  deviceModel Device?  @relation(fields: [deviceId], references: [id]) 
+  
+  // Legacy string fallback
+  device      String   
+
+  status      String   @default("RECEBIDO") // RECEBIDO, EM_ANALISE, AGUARDANDO_APROVACAO, AGUARDANDO_PECA, EM_REPARO, PRONTO, ENTREGUE, CANCELADO
+  
+  // Details
+  description String?  // Defeito informado pelo cliente
+  diagnosis   String?  // Diagnóstico TÉCNICO
+  checklist   String?  // Checklist de entrada (JSON?)
+  
+  total       Decimal  @default(0)
+  
+  entryDate   DateTime @default(now())
+  exitDate    DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  items       OrderItem[]
+  payments    Payment[]
+  history     OSHistory[]
+
+  @@index([userId])
+}
+
+model OSHistory { // Novo: Log de Alterações
+  id          Int      @id @default(autoincrement())
+  orderId     Int
+  order       ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  
+  status      String   // Status novo
+  notes       String?  // Observação da mudança
+  
+  createdAt   DateTime @default(now())
+}
+
+model OrderItem {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  order     ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  // Either a product or a service
+  productId Int?
+  product   Product? @relation(fields: [productId], references: [id])
+  serviceId Int?
+  service   Service? @relation(fields: [serviceId], references: [id])
+
+  quantity  Int      @default(1)
+  unitPrice Decimal  // Snapshot of price at time of order
+  unitCost  Decimal  @default(0) // Snapshot of cost at time of order (for products)
+
+  @@index([orderId])
+}
+
+model Payment {
+  id              Int           @id @default(autoincrement())
+  userId          Int
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  orderId         Int
+  order           ServiceOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  amount          Decimal       // Total transaction amount
+  status          String        @default("PENDING") // PENDING, PAID, CANCELLED
+  method          String?       // CREDIT_CARD, BOLETO, CASH, PIX, DEBIT
+  installments    Int           @default(1)
+  
+  boletoLink      String?       // URL to generated boleto
+  boletoId        String?       // External ID if using a gateway
+  
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([orderId])
+}
+
+model CashRegister {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  openTime        DateTime @default(now())
+  closeTime       DateTime?
+  
+  initialAmount   Decimal  @default(0) // Fundo de troco
+  finalAmount     Decimal? // Valor conferido no fechamento
+  
+  status          String   @default("OPEN") // OPEN, CLOSED
+
+  transactions    CashTransaction[]
+  
+  @@index([userId])
+}
+
+model CashTransaction {
+  id              Int      @id @default(autoincrement())
+  registerId      Int
+  register        CashRegister @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  
+  type            String   // IN (Suprimento), OUT (Sangria), SALE (Venda - optional link)
+  description     String
+  amount          Decimal
+  
+  createdAt       DateTime @default(now())
+}
+
+model ProductInquiry {
+  id        Int      @id @default(autoincrement())
+  sellerId  Int
+  seller    User     @relation("SellerInquiries", fields: [sellerId], references: [id], onDelete: Cascade)
+
+  clientId  Int?
+  client    User?    @relation("ClientInquiries", fields: [clientId], references: [id])
+  
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  visitorName  String
+  visitorPhone String
+  message      String
+  
+  createdAt DateTime @default(now())
+  read      Boolean  @default(false)
+
+  @@index([sellerId])
+}
